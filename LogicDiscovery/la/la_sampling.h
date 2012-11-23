@@ -19,6 +19,8 @@
 //Port D: D5 has pull-up and led, connected nFault of STMPS2141STR. D12-15 connected to color LEDs <- looks safe
 //Port E: E0,E1 - active low from LIS302DL, non-usable
 #define SAMPLING_PORT GPIOD
+//enable manual trigger by user-button
+#define SAMPLING_MANUAL
 
 class Sampler
 {

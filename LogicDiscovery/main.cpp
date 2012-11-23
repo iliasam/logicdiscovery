@@ -156,6 +156,17 @@ void Init()
 	gpioInit.GPIO_Speed = GPIO_Speed_100MHz;
 	GPIO_Init(SAMPLING_PORT, &gpioInit);
 #endif
+
+#ifdef SAMPLING_MANUAL
+	gpioInit.GPIO_Pin = 0x0001;
+	gpioInit.GPIO_Mode = GPIO_Mode_AF;
+	gpioInit.GPIO_OType = GPIO_OType_PP;
+	gpioInit.GPIO_PuPd = GPIO_PuPd_DOWN;
+	gpioInit.GPIO_Speed = GPIO_Speed_2MHz;
+	GPIO_Init(GPIOA, &gpioInit);
+
+	GPIO_PinAFConfig(GPIOA, GPIO_PinSource0 , GPIO_AF_TIM8);
+#endif
 }
 
 extern "C" int uart_getc(void){return 0;}

@@ -15,6 +15,7 @@ Sampler sampler;
 
 static void SamplingHalfFrameCompelte();
 static void SamplingExternalEventInterrupt();
+static void SamplingManualStart();
 
 static InterruptHandler comletionHandler = NULL;
 uint8_t _AHBBSS samplingRam[MAX_SAMPLING_RAM];
@@ -124,8 +125,15 @@ void Sampler::Setup()
 	else InterruptController::DisableChannel(EXTI4_IRQn);
 	if(triggerMask & 0x03E0)InterruptController::EnableChannel(EXTI9_5_IRQn, 0, 0, SamplingExternalEventInterrupt);
 	else InterruptController::DisableChannel(EXTI9_5_IRQn);
-	if(triggerMask & 0xF800)InterruptController::EnableChannel(EXTI15_10_IRQn, 0, 0, SamplingExternalEventInterrupt);
+	if(triggerMask & 0xFC00)InterruptController::EnableChannel(EXTI15_10_IRQn, 0, 0, SamplingExternalEventInterrupt);
 	else InterruptController::DisableChannel(EXTI15_10_IRQn);
+
+#ifdef SAMPLING_MANUAL
+	TIM8->SMCR = TIM_SMCR_TS_0 | TIM_SMCR_TS_1 | TIM_SMCR_TS_2;//External trigger input
+	TIM8->SMCR |= TIM_SMCR_SMS_1 | TIM_SMCR_SMS_2;
+	TIM8->DIER |= TIM_DIER_TIE;
+	InterruptController::EnableChannel(TIM8_TRG_COM_TIM14_IRQn, 2, 0, SamplingManualStart);
+#endif
 }
 
 void Sampler::Start()
@@ -233,4 +241,11 @@ static void SamplingExternalEventInterrupt()
 	TIM8->CR1 |= TIM_CR1_CEN;
 	la_debug[0] = DMA2_Stream5->NDTR;
 	la_debug[1]++;
+}
+
+static void SamplingManualStart()
+{
+	TIM8->SR &= ~TIM_SR_TIF;
+	TIM8->DIER &= ~TIM_DIER_TIE;
+	SamplingExternalEventInterrupt();
 }
