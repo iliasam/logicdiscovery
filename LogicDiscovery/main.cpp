@@ -1,47 +1,23 @@
 //#define USE_STDPERIPH_DRIVER
 //#include "stm32f4xx.h"
+#include <stdint.h>
 #include "nvic.h"
 #include "usb.h"
 #include "stm32f4xx.h"
 #include "misc.h"
 #include "ramblocks.h"
 
-#include "lcd.h"
-#include "asciiLib.h"
-
 #include "delay.h"
 
+#include "sump.h"
 #include "la_sampling.h"
 //#include "stm32f2xx_dma.h"
 
+USART_TypeDef *uart;
+
+void UartCommandInterruptHandler(void);
+
 static void Init();
-
-#define ADC_CDR_ADDRESS    ((uint32_t)0x40012308)
-//volatile uint32_t databuf[1000*3];
-volatile uint32_t cnt = 0;
-
-//volatile camBuffer _AHBBSS camBufferPriT;
-//volatile camBuffer _AHBBSS camBufferSecT;
-
-void InitSDIOPins(void)
-{
-
-}
-
-void InitNANDPins(void)
-{
-
-}
-
-void InitEthernetPins(void)
-{
-
-}
-
-void InitULPIPins(void)
-{
-
-}
 
 void Init()
 {
@@ -167,6 +143,32 @@ void Init()
 
 	GPIO_PinAFConfig(GPIOA, GPIO_PinSource0 , GPIO_AF_TIM8);
 #endif
+
+
+	USART_InitTypeDef USART_InitStructure;
+	GPIO_InitTypeDef GPIO_InitStructure;
+
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_6 | GPIO_Pin_7;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP ;
+	GPIO_Init(GPIOA, &GPIO_InitStructure);
+
+	RCC_APB2PeriphClockCmd(RCC_APB2ENR_USART6EN, ENABLE);
+	USART_InitStructure.USART_BaudRate = 115200;
+	USART_InitStructure.USART_WordLength = USART_WordLength_8b;
+	USART_InitStructure.USART_StopBits = USART_StopBits_1;
+	USART_InitStructure.USART_Parity = USART_Parity_No;
+	USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+	USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
+
+	USART_Init(USART6, &USART_InitStructure);
+
+	uart = USART6;
+
+	//USART_Cmd(USART6, ENABLE);
+	//InterruptController::EnableChannel(USART6_IRQn, 2, 0, UartCommandInterruptHandler);
 }
 
 extern "C" int uart_getc(void){return 0;}
@@ -174,27 +176,80 @@ extern "C" int uart_putc(int c){return 0;}
 
 extern "C" void HardFault_Handler()
 {
-	GUI_Text(0, 70, (uint8_t*)" HardFault", White, Red);
+	//GUI_Text(0, 70, (uint8_t*)" HardFault", White, Red);
 }
 
 extern "C" void MemManage_Handler()
 {
-	GUI_Text(0, 70, (uint8_t*)" MemManage", White, Red);
+	//GUI_Text(0, 70, (uint8_t*)" MemManage", White, Red);
 }
 
 extern "C" void BusFault_Handler()
 {
-	GUI_Text(0, 70, (uint8_t*)" BusFault", White, Red);
+	//GUI_Text(0, 70, (uint8_t*)" BusFault", White, Red);
 }
 
 extern "C" void NMI_Handler()
 {
-	GUI_Text(0, 70, (uint8_t*)" NMI", White, Red);
+	//GUI_Text(0, 70, (uint8_t*)" NMI", White, Red);
 }
 
 extern "C" void UsageFault_Handler()
 {
-	GUI_Text(0, 70, (uint8_t*)" UsageFault", White, Red);
+	//GUI_Text(0, 70, (uint8_t*)" UsageFault", White, Red);
+}
+
+//USB transfer function wrappers
+extern "C" uint16_t VCP_ByteTx (uint8_t dataByte);
+void USBTXByte(uint8_t data)
+{
+	VCP_ByteTx(data);
+}
+
+void USBTXBuffer(uint8_t *data, int count)
+{
+	for(int i = 0; i < count; i++)
+	{
+		VCP_ByteTx(data[i]);
+	}
+}
+
+//UART transfer functions
+void UARTTXByte(uint8_t data)
+{
+	while(0 == (uart->SR & USART_SR_TXE));
+	uart->DR = data;
+}
+
+void UARTTXBuffer(uint8_t *data, int count)
+{
+	for(int i = 0; i < count; i++)
+	{
+		UARTTXByte(data[i]);
+	}
+}
+
+#define UART_RX_BUFFER_SIZE 100
+static uint8_t uartRXBuffer[UART_RX_BUFFER_SIZE];
+static int uartRXCount = 0;
+
+void UartCommandInterruptHandler(void)
+{
+	uint16_t sr = USART6->SR;
+	if((sr & USART_SR_RXNE) && (USART6->CR1 & USART_CR1_RXNEIE))
+	{
+		uartRXBuffer[uartRXCount++] = USART_ReceiveData(USART6);
+		if(uartRXCount == UART_RX_BUFFER_SIZE)uartRXCount = 0;
+	}
+	if((sr & USART_SR_IDLE) && (USART6->CR1 & USART_CR1_IDLEIE))
+	{
+		//IDLE status is cleared by a software sequence
+		//(an read to the USART_SR register followed by a read to the USART_DR register)
+		USART6->SR;
+		USART6->DR;
+		SumpProcessRequest(uartRXBuffer, uartRXCount);
+		uartRXCount = 0;
+	}
 }
 
 int main(void)
@@ -208,7 +263,13 @@ int main(void)
 	//LCD_Clear(Black);
 
 	Delay(100);
+
+	//SumpSetTXFunctions(UARTTXByte, UARTTXBuffer);//operating over UART
+
+	SumpSetTXFunctions(USBTXByte, USBTXBuffer);//operating over USB
 	usbInit();
+
+
 	for(;;)
 	{
 		GPIOD->ODR |= GPIO_ODR_ODR_12;

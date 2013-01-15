@@ -67,7 +67,6 @@
 #include "usbd_cdc_core.h"
 #include "usbd_desc.h"
 #include "usbd_req.h"
-#include "lcd.h"
 
 /** @addtogroup STM32_USB_OTG_DEVICE_LIBRARY
   * @{
@@ -622,7 +621,7 @@ static uint8_t  usbd_cdc_EP0_RxReady (void  *pdev)
   * @param  epnum: endpoint number
   * @retval status
   */
-static char text[100];
+
 static int ntx;
 static uint8_t  usbd_cdc_DataIn (void *pdev, uint8_t epnum)
 {

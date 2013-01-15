@@ -59,6 +59,10 @@ extern "C" {
 #define BYTE3(v) ((uint8_t)(v >> 16) & 0xff) //
 #define BYTE4(v) ((uint8_t)(v >> 24) & 0xff) //MSB
 
+typedef void (*SumpByteTXFunction)(uint8_t data);
+typedef void (*SumpBufferTXFunction)(uint8_t *data, int count);
+
+void SumpSetTXFunctions(SumpByteTXFunction byteTX, SumpBufferTXFunction bufferTX);
 void SumpProcessRequest(uint8_t *buffer, int len);
 
 #ifdef __cplusplus

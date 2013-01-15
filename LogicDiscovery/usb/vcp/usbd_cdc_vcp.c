@@ -32,7 +32,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "usbd_cdc_vcp.h"
 #include "usb_conf.h"
-#include "lcd.h"
 #include "sump.h"
 
 /* Private typedef -----------------------------------------------------------*/

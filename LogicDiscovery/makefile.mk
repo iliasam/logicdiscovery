@@ -61,8 +61,7 @@ SRC += system.c
 SRC += syscalls.c stm32f4xx_dma.c stm32f4xx_tim.c stm32f4xx_gpio.c stm32f4xx_i2c.c stm32f4xx_fsmc.c stm32f4xx_usart.c
 SRC += stm32f4xx_adc.c misc.c stm32f4xx_sdio.c stm32f4xx_exti.c stm32f4xx_syscfg.c stm32f4xx_rcc.c  stm32f4xx_dcmi.c
 SRC += delay.c
-SRC += LCD.c AsciiLib.c
-#SRC += RoundRobinBuffer.c printf.c 
+#SRC += LCD.c AsciiLib.c
 #STM32 USB FS Lib
 SRC += usbd_core.c usbd_ioreq.c usbd_req.c usbd_usr.c usb_dcd.c usb_core.c usb_dcd_int.c
 SRC += usbd_desc.c usbd_cdc_vcp.c usbd_cdc_core.c
@@ -73,9 +72,8 @@ SRCARM  =
 
 # List C++ source files here.
 # use file-extension cpp for C++-files (use extension .cpp)
-CPPSRC = $(wildcard *.cpp) 
+#CPPSRC = $(wildcard *.cpp) 
 CPPSRC = main.cpp nvic.cpp
-#CPPSRC += host_intf.cpp channel_monitor.cpp reply_table.cpp
 CPPSRC += usb.cpp
 CPPSRC += la_sampling.cpp sump.cpp
 
@@ -169,7 +167,7 @@ AT91LIBNOWARN = no
 CSTANDARD = -std=gnu99
 
 # Place -D or -U options for C here
-CDEFS +=  -Dgcc -D$(DENSITY) -D$(SUBMDL) -DHSE_VALUE=16000000 
+CDEFS +=  -Dgcc -D$(DENSITY) -D$(SUBMDL) -DHSE_VALUE=8000000 
 #CDEFS +=  -Dgcc -DSTM32F10X_MD
 CDEFS +=  -DCFG_LINKER_HAS_ISR_SECTION -DUSE_STDPERIPH_DRIVER 
 CDEFS +=  -DHAVE_CONFIG_H
