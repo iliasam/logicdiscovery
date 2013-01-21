@@ -70,7 +70,7 @@ void SamplingSetTriggerValue(uint32_t value);
 //arm trigger
 void SamplingTriggerEnable(InterruptHandler handler);
 
-typedef enum SamplingBufferPart
+enum SamplingBufferPart
 {
 	sbpOld,
 	sbpNew,

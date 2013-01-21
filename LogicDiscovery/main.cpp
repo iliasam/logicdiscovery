@@ -14,6 +14,7 @@
 //#include "stm32f2xx_dma.h"
 
 USART_TypeDef *uart;
+int configPins;
 
 void UartCommandInterruptHandler(void);
 
@@ -29,7 +30,8 @@ void Init()
 
 	RCC_AHB1PeriphClockCmd( RCC_AHB1Periph_GPIOA | RCC_AHB1Periph_GPIOB |
 							 RCC_AHB1Periph_GPIOC | RCC_AHB1Periph_GPIOD |
-							 RCC_AHB1Periph_GPIOE | RCC_AHB1Periph_GPIOF, ENABLE);
+							 RCC_AHB1Periph_GPIOE | RCC_AHB1Periph_GPIOF |
+							 RCC_AHB1Periph_GPIOG | RCC_AHB1Periph_GPIOH , ENABLE);
 	RCC_AHB3PeriphClockCmd(RCC_AHB3Periph_FSMC, ENABLE);
 
 	// FSMC GPIO configuration
@@ -144,7 +146,26 @@ void Init()
 	GPIO_PinAFConfig(GPIOA, GPIO_PinSource0 , GPIO_AF_TIM8);
 #endif
 
+//	USART_ITConfig(USART6, USART_IT_IDLE, ENABLE);
+}
 
+bool ReadConfigPin()
+{
+	GPIO_InitTypeDef GPIO_InitStructure;
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_2MHz;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP ;
+	GPIO_Init(GPIOC, &GPIO_InitStructure);
+
+	__DMB();
+
+	return GPIOC->IDR & GPIO_Pin_1;
+}
+
+void UartInit()
+{
 	USART_InitTypeDef USART_InitStructure;
 	GPIO_InitTypeDef GPIO_InitStructure;
 
@@ -153,7 +174,10 @@ void Init()
 	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
 	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
 	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_UP ;
-	GPIO_Init(GPIOA, &GPIO_InitStructure);
+	GPIO_Init(GPIOC, &GPIO_InitStructure);
+
+	GPIO_PinAFConfig(GPIOC, GPIO_PinSource6, GPIO_AF_USART6);
+	GPIO_PinAFConfig(GPIOC, GPIO_PinSource7, GPIO_AF_USART6);
 
 	RCC_APB2PeriphClockCmd(RCC_APB2ENR_USART6EN, ENABLE);
 	USART_InitStructure.USART_BaudRate = 115200;
@@ -167,8 +191,9 @@ void Init()
 
 	uart = USART6;
 
-	//USART_Cmd(USART6, ENABLE);
-	//InterruptController::EnableChannel(USART6_IRQn, 2, 0, UartCommandInterruptHandler);
+	USART_Cmd(USART6, ENABLE);
+	InterruptController::EnableChannel(USART6_IRQn, 2, 0, UartCommandInterruptHandler);
+	USART_ITConfig(USART6, USART_IT_RXNE, ENABLE);
 }
 
 extern "C" int uart_getc(void){return 0;}
@@ -236,59 +261,48 @@ static int uartRXCount = 0;
 void UartCommandInterruptHandler(void)
 {
 	uint16_t sr = USART6->SR;
-	if((sr & USART_SR_RXNE) && (USART6->CR1 & USART_CR1_RXNEIE))
+	if((sr & USART_SR_RXNE))
 	{
-		uartRXBuffer[uartRXCount++] = USART_ReceiveData(USART6);
-		if(uartRXCount == UART_RX_BUFFER_SIZE)uartRXCount = 0;
+		uint8_t byte = USART_ReceiveData(USART6);
+		uartRXBuffer[uartRXCount++] = byte;
+		if(SumpProcessRequest(uartRXBuffer, uartRXCount))
+		{
+			uartRXCount = 0;
+		}
+		if(uartRXCount >= 5)
+			uartRXCount = 0;
 	}
-	if((sr & USART_SR_IDLE) && (USART6->CR1 & USART_CR1_IDLEIE))
-	{
-		//IDLE status is cleared by a software sequence
-		//(an read to the USART_SR register followed by a read to the USART_DR register)
-		USART6->SR;
-		USART6->DR;
-		SumpProcessRequest(uartRXBuffer, uartRXCount);
-		uartRXCount = 0;
-	}
+//	if((sr & USART_SR_IDLE) && (USART6->CR1 & USART_CR1_IDLEIE))
+//	{
+//		//IDLE status is cleared by a software sequence
+//		//(an read to the USART_SR register followed by a read to the USART_DR register)
+//		USART6->SR;
+//		USART6->DR;
+//		if(uartRXCount)
+//			SumpProcessRequest(uartRXBuffer, uartRXCount);
+//		uartRXCount = 0;
+//	}
 }
 
 int main(void)
 {
-	const int max = 1000000;
 	Init();
-//	DCMI_Test();
-	GPIOD->ODR = 0;
-
-	//LCD_Initializtion();
-	//LCD_Clear(Black);
 
 	Delay(100);
 
-	//SumpSetTXFunctions(UARTTXByte, UARTTXBuffer);//operating over UART
-
-	SumpSetTXFunctions(USBTXByte, USBTXBuffer);//operating over USB
-	usbInit();
-
-
-	for(;;)
+	//port selection. 1 - USB FS (default), 0 - USART6
+	if(ReadConfigPin())
 	{
-		GPIOD->ODR |= GPIO_ODR_ODR_12;
-		Delay(100);
-		GPIOD->ODR |= GPIO_ODR_ODR_13;
-		Delay(100);
-		GPIOD->ODR |= GPIO_ODR_ODR_14;
-		Delay(100);
-		GPIOD->ODR |= GPIO_ODR_ODR_15;
-		Delay(100);
-		GPIOD->ODR &= ~GPIO_ODR_ODR_12;
-		Delay(100);
-		GPIOD->ODR &= ~GPIO_ODR_ODR_13;
-		Delay(100);
-		GPIOD->ODR &= ~GPIO_ODR_ODR_14;
-		Delay(100);
-		GPIOD->ODR &= ~GPIO_ODR_ODR_15;
-		Delay(100);
+		SumpSetTXFunctions(USBTXByte, USBTXBuffer);//operating over USB
+		usbInit();
 	}
+	else
+	{
+		SumpSetTXFunctions(UARTTXByte, UARTTXBuffer);//operating over UART
+		UartInit();
+	}
+
+	for(;;)__WFI();
 
 	return 0;
 }

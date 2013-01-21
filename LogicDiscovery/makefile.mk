@@ -38,12 +38,12 @@ TCHAIN = arm-none-eabi
 MCU      = cortex-m4
 #SUBMDL   = STM32F2XX
 SUBMDL   = STM32F4XX
-#DENSITY  = STM32F10X_MD
 DENSITY  = STM32F20X
 
 # must be yes - only THUMB2 on M3 no ARM:
 USE_THUMB_MODE = YES
 PALTFORM = ./platform/stm32f4
+#PALTFORM = ./platform/stm32f4_150MHz
 
 ## Exception-Vector placement not used so far in M3-examples
 ## (placement settings ignored when using "RAM_RUN")
@@ -89,7 +89,6 @@ CPPSRCARM =
 # it will preserve the spelling of the filenames, and gcc itself does
 # care about how the name is spelled on its command-line.
 ASRC = $(PALTFORM)/startup.S
-#ASRC += filters_cortexM3.S ltp_cortexM3.S vq_cortexM3.S
 
 # List Assembler source files here which must be assembled in ARM-Mode..
 ASRCARM  = 
@@ -124,7 +123,6 @@ LINKERSCRIPTPATH = ./
 # list some places to look for source files (PH May 2009)
 # the ST peripheral driver library sources must be findable
 #STLIBS   = G:/Work/ST/libs
-STLIBS   = D:/Work/CommonStuff/ST-Libs
 LIBSTM32 = $(STLIBS)/STM32F4xx_DSP_StdPeriph_Lib_V1.0.1/Libraries
 #CM3      = $(LIBSTM32)/CMSIS/CM3/CoreSupport
 CM4      = $(LIBSTM32)/CMSIS
@@ -137,7 +135,6 @@ LA       = ./la
 USBOTG   = $(STLIBS)/STM32_USB-Host-Device_Lib_V2.1.0/Libraries/STM32_USB_OTG_Driver
 USBLIB   = $(STLIBS)/STM32_USB-Host-Device_Lib_V2.1.0/Libraries/STM32_USB_Device_Library/Core
 ONBOARD  = ./onboard
-FRTOS	 = ./FreeRTOS ./FreeRTOS/portable/GCC/ARM_CM3 ./FreeRTOS/include ./FreeRTOS/portable/MemMang
 #BOOST	 = D:/Stuff/boost
 
 #vpath %.S $(LIBSPEEX)/STM32/libspeex/gcc

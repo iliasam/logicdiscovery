@@ -14,6 +14,10 @@
 extern "C" {
 #endif
 
+//frequency base of the original SUMP logic analyzer
+//used for converting frequency dividers
+#define SUMP_ORIGINAL_FREQ	(100000000)
+
 //short sump commands
 #define SUMP_CMD_RESET	0x00
 #define SUMP_CMD_RUN	0x01
@@ -63,7 +67,8 @@ typedef void (*SumpByteTXFunction)(uint8_t data);
 typedef void (*SumpBufferTXFunction)(uint8_t *data, int count);
 
 void SumpSetTXFunctions(SumpByteTXFunction byteTX, SumpBufferTXFunction bufferTX);
-void SumpProcessRequest(uint8_t *buffer, int len);
+int SumpProcessRequest(uint8_t *buffer, int len);
+int SumpIsShortCommand(uint8_t command);
 
 #ifdef __cplusplus
 }

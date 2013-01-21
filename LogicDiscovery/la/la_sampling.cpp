@@ -13,7 +13,7 @@
 
 Sampler sampler;
 
-static void SamplingHalfFrameCompelte();
+static void SamplingFrameCompelte();
 static void SamplingExternalEventInterrupt();
 static void SamplingManualStart();
 
@@ -33,7 +33,7 @@ void Sampler::Setup()
 	TIM1->CNT = 0;
 	TIM1->PSC = 0;
 	TIM1->CR1 = TIM_CR1_URS;
-	TIM1->ARR = period;
+	TIM1->ARR = period;//actual period is +1 of this value
 	TIM1->CR2 = 0;
 	TIM1->DIER = TIM_DIER_UDE;
 	TIM1->EGR = TIM_EGR_UG;
@@ -63,6 +63,7 @@ void Sampler::Setup()
 	//TIM1_UP -> DMA2, Ch6, Stream5
 	//DMA should be stopped before this point
 	DMA2_Stream5->CR = (DMA_SxCR_CHSEL_1 | DMA_SxCR_CHSEL_2) | dmaSize | DMA_SxCR_MINC | DMA_SxCR_CIRC;
+	//DMA2_Stream5->CR = D<>| dmaSize | DMA_SxCR_MINC | DMA_SxCR_CIRC;
 	DMA2_Stream5->M0AR = (uint32_t)samplingRam;
 #ifdef SAMPLING_FSMC
 	DMA2_Stream5->PAR  = (uint32_t)FSMC_ADDR;
@@ -70,7 +71,7 @@ void Sampler::Setup()
 	DMA2_Stream5->PAR  = (uint32_t)&(SAMPLING_PORT->IDR);
 #endif
 	DMA2_Stream5->NDTR = transferCount;// / transferSize;
-	DMA2_Stream5->FCR = 0;
+	DMA2_Stream5->FCR = DMA_SxFCR_DMDIS | DMA_SxFCR_FTH;
 
 	//After-trigger delay timer
 	TIM8->CR1 = TIM_CR1_URS;//stop timer too
@@ -82,7 +83,7 @@ void Sampler::Setup()
 	TIM8->SR &= ~TIM_SR_UIF;
 	TIM8->DIER = TIM_DIER_UIE;
 
-	InterruptController::EnableChannel(TIM8_UP_TIM13_IRQn, 2, 0, SamplingHalfFrameCompelte);
+	InterruptController::EnableChannel(TIM8_UP_TIM13_IRQn, 2, 0, SamplingFrameCompelte);
 
 	//Trigger setup
 	uint32_t rising = triggerMask & triggerValue;
@@ -220,7 +221,7 @@ void SamplingClearBuffer()
 		samplingRam[i] = 0;
 }
 
-static void SamplingHalfFrameCompelte()
+static void SamplingFrameCompelte()
 {
 	TIM1->CR1 &= ~TIM_CR1_CEN;
 	TIM8->CR1 &= ~TIM_CR1_CEN;
@@ -230,7 +231,7 @@ static void SamplingHalfFrameCompelte()
 		comletionHandler();
 }
 
-uint32_t la_debug[2];
+//uint32_t la_debug[2];
 static void SamplingExternalEventInterrupt()
 {
 	EXTI->PR = 0xffffffff;
@@ -239,13 +240,14 @@ static void SamplingExternalEventInterrupt()
 	TIM8->CNT = 0;
 	TIM8->SR  &= ~TIM_SR_UIF;
 	TIM8->CR1 |= TIM_CR1_CEN;
-	la_debug[0] = DMA2_Stream5->NDTR;
-	la_debug[1]++;
+	//la_debug[0] = DMA2_Stream5->NDTR;
+	//la_debug[1]++;
 }
 
 static void SamplingManualStart()
 {
 	TIM8->SR &= ~TIM_SR_TIF;
 	TIM8->DIER &= ~TIM_DIER_TIE;
+	//call regular handler
 	SamplingExternalEventInterrupt();
 }

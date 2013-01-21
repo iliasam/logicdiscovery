@@ -90,10 +90,27 @@ static void DemoUSARTIrq()
 	TIM2->SR &= ~TIM_SR_UIF;
 	if(USART2->SR & USART_SR_TXE)
 		USART2->DR = num++;
-//	while(!(USART2->SR & USART_SR_TXE));
-//		USART2->DR = 0x34;
-//	while(!(USART2->SR & USART_SR_TXE));
-//		USART2->DR = 0x56;
+	while(!(USART2->SR & USART_SR_TXE));
+		USART2->DR = num++;
+}
+
+int SumpIsShortCommand(uint8_t command)
+{
+	switch(command)
+	{
+	case SUMP_CMD_RESET:
+	case SUMP_CMD_RUN:
+	case SUMP_CMD_ID:
+	case SUMP_CMD_META:
+		return true;
+	default:
+		return false;
+	}
+}
+
+uint32_t CalcLocalDivider(uint32_t divider, const uint32_t localFrequency, const uint32_t sumpFrequency)
+{
+	return localFrequency / (sumpFrequency / (divider + 1)) - 1;
 }
 
 //extern CDC_IF_Prop_TypeDef VCP_fops;
@@ -102,8 +119,9 @@ static void DemoUSARTIrq()
 //static int samplingDelayCount = 0;
 static uint32_t divider = 1;
 static int startup = 1;
-void SumpProcessRequest(uint8_t *buffer, int len)
+int SumpProcessRequest(uint8_t *buffer, int len)
 {
+	int result = 0;
 	switch(buffer[0])
 	{
 	case SUMP_CMD_RESET://reset
@@ -115,58 +133,78 @@ void SumpProcessRequest(uint8_t *buffer, int len)
 		//SamplingSetupTimer(16);
 		sampler.Stop();
 	    SamplingClearBuffer();
-
+	    result = 1;
 	  break;
 	case SUMP_CMD_RUN://run
 		sampler.Start();
 		sampler.Arm(SamplingComplete);
+		result = 1;
 	  break;
 	case SUMP_CMD_ID://ID
 		//APP_FOPS.pIf_DataTx((uint8_t*)"1ALS", 4);
 		bufferTXFunc((uint8_t*)"1ALS", 4);
+		result = 1;
 	  break;
 	case SUMP_CMD_META://Query metas
 		//APP_FOPS.pIf_DataTx((uint8_t*)metaData, sizeof(metaData));
 		bufferTXFunc((uint8_t*)metaData, sizeof(metaData));
+		result = 1;
 	  break;
 	case SUMP_CMD_SET_SAMPLE_RATE:
+		if(len == 5)
 		{
 			//div120 = 120MHz / (100MHz / (div100 + 1)) - 1;
 			divider = *((uint32_t*)(buffer+1));
 			//if maximum samplerate is 20MHz => 100/20 = 5, 5 - 1 = 4
-			//if maximum samplerate is 40MHz => 100/40
-			if(divider < 1)divider = 4;
-			uint32_t localDiv = 120000000 / (100000000 / (divider + 1)) - 1;
-			divider = localDiv;
+			if(divider != 0)
+			{
+				RCC_ClocksTypeDef clocks;
+				RCC_GetClocksFreq(&clocks);
+				divider = CalcLocalDivider(divider, clocks.PCLK2_Frequency, SUMP_ORIGINAL_FREQ);
+			}
+			if(divider == 0)
+			{
+				divider = 1;
+			}
 			sampler.SetSamplingPeriod(divider);
+			result = 1;
 			//GUI_Text(0, 14, (uint8_t*)text, White, Black);
 		}
 		break;
 	case SUMP_CMD_SET_COUNTS:
+		if(len == 5)
 		{
 			uint16_t readCount  = 1 + *((uint16_t*)(buffer+1));
 			uint16_t delayCount = *((uint16_t*)(buffer+3));
 			sampler.SetBufferSize(4*readCount);
 			sampler.SetDelayCount(4*delayCount);
+			result = 1;
 			//GUI_Text(100, 14, (uint8_t*)text, White, Black);
 		}
 		break;
 	case SUMP_CMD_SET_BT0_MASK:
+		if(len == 5)
 		{
 			sampler.SetTriggerMask(*(uint32_t*)(buffer+1));
+			result = 1;
 		}
 		break;
 	case SUMP_CMD_SET_BT0_VALUE:
+		if(len == 5)
 		{
 			sampler.SetTriggerValue(*(uint32_t*)(buffer+1));
+			result = 1;
 		}
 		break;
 	case SUMP_CMD_SET_FLAGS:
+		if(len == 5)
 		{
 			sampler.SetFlags(*(uint16_t*)(buffer+1));
+			result = 1;
 		}
 		break;
 	}
+	return result;
 }
 
 void SamplingComplete()
