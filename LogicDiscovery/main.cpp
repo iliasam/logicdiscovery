@@ -284,11 +284,32 @@ void UartCommandInterruptHandler(void)
 //	}
 }
 
+void LedTest(void)
+{
+	GPIO_InitTypeDef gpioInit;
+	gpioInit.GPIO_Pin = 0xf000;
+	gpioInit.GPIO_Mode = GPIO_Mode_OUT;
+	gpioInit.GPIO_OType = GPIO_OType_PP;
+	gpioInit.GPIO_PuPd = GPIO_PuPd_DOWN;
+	gpioInit.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_Init(GPIOD, &gpioInit);
+
+	for(;;)
+	{
+		Delay(1000);
+		GPIOD->BSRRL = 0xF000;
+		Delay(1000);
+		GPIOD->BSRRH = 0xF000;
+	}
+}
+
 int main(void)
 {
 	Init();
 
 	Delay(100);
+
+	//LedTest();
 
 	//port selection. 1 - USB FS (default), 0 - USART6
 	if(ReadConfigPin())
@@ -302,7 +323,10 @@ int main(void)
 		UartInit();
 	}
 
-	for(;;)__WFI();
+	for(;;)
+	{
+		__WFI();
+	}
 
 	return 0;
 }

@@ -13,20 +13,52 @@
 
 Sampler sampler;
 
+static uint32_t transferCount;
+static uint32_t delayCount;
+
 static void SamplingFrameCompelte();
 static void SamplingExternalEventInterrupt();
+static void SamplingRLEExternalEventInterrupt();
 static void SamplingManualStart();
 
-static InterruptHandler comletionHandler = NULL;
-uint8_t _AHBBSS samplingRam[MAX_SAMPLING_RAM];
+template <class samplesType, uint32_t FLAG, uint32_t MAX_COUNT>
+static void SamplingRLEFrameInterrupt() __attribute__ ( ( isr ) );//__attribute__ ( ( isr ) ) ;
 
-void Sampler::Setup()
+template <class samplesType, uint32_t FLAG, uint32_t MAX_COUNT>
+static void SamplingRLETailFrameInterrupt() __attribute__ ( ( isr ) );// __attribute__ ( ( isr, naked ) );
+
+static InterruptHandler samplingManualToExternalTransit = NULL;
+static InterruptHandler samplingRLETailFrameInterrupt = NULL;
+static InterruptHandler comletionHandler = NULL;
+uint32_t _AHBBSS samplingRam[MAX_SAMPLING_RAM/4];
+uint32_t _AHBBSS rleTempSamplingRamA[MAX_RLE_SAMPLE_COUNT];
+uint32_t _AHBBSS rleTempSamplingRamB[MAX_RLE_SAMPLE_COUNT];
+
+static uint32_t rlePtr;
+static uint32_t rleValue;
+static uint32_t rleRepeatCount;
+static int rleDelayCount;
+static bool rleTailSampling;
+
+#define RLE_16BIT_FLAG 0x8000
+#define RLE_8BIT_FLAG 0x80
+
+#define RLE_16BIT_MAX_COUNT 0x7fff
+#define RLE_8BIT_MAX_COUNT 0x7f
+
+void Sampler::SetBufferSize(uint32_t value)
+{
+	transferCount = value;
+}
+void Sampler::SetDelayCount(uint32_t value)
+{
+	delayCount = value & 0xfffffffe;
+	rleDelayCount = value & 0xfffffffe;
+}
+
+void Sampler::SetupSamplingTimer()
 {
 	RCC_APB2PeriphClockCmd(RCC_APB2ENR_TIM1EN, ENABLE);
-	RCC_APB2PeriphClockCmd(RCC_APB2ENR_TIM8EN, ENABLE);
-	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_DMA2EN, ENABLE);
-	RCC_APB2PeriphClockCmd(RCC_APB2ENR_SYSCFGEN, ENABLE);
-
 	//Main sampling timer
 	TIM1->DIER = 0;
 	TIM1->SR &= ~TIM_SR_UIF;
@@ -37,9 +69,11 @@ void Sampler::Setup()
 	TIM1->CR2 = 0;
 	TIM1->DIER = TIM_DIER_UDE;
 	TIM1->EGR = TIM_EGR_UG;
+}
 
+uint32_t Sampler::CalcDMATransferSize()
+{
 	uint32_t dmaSize = 0;
-
 	//handle 8/16/32 bit samplings
 	switch(flags & SUMP_FLAG1_GROUPS)
 	{
@@ -57,33 +91,71 @@ void Sampler::Setup()
 		transferSize = 1;
 		break;
 	}
+	return dmaSize;
+}
 
-	TIM8->DIER = 0;
-	TIM8->SR &= ~TIM_SR_UIF;
+void Sampler::SetupSamplingDMA(void *dataBuffer, uint32_t dataTransferCount)
+{
+	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_DMA2EN, ENABLE);
+	uint32_t dmaSize = CalcDMATransferSize();
+
+	//TIM8->DIER = 0;
+	//TIM8->SR &= ~TIM_SR_UIF;
+
 	//TIM1_UP -> DMA2, Ch6, Stream5
 	//DMA should be stopped before this point
 	DMA2_Stream5->CR = (DMA_SxCR_CHSEL_1 | DMA_SxCR_CHSEL_2) | dmaSize | DMA_SxCR_MINC | DMA_SxCR_CIRC;
 	//DMA2_Stream5->CR = D<>| dmaSize | DMA_SxCR_MINC | DMA_SxCR_CIRC;
-	DMA2_Stream5->M0AR = (uint32_t)samplingRam;
+	DMA2_Stream5->M0AR = (uint32_t)dataBuffer;//samplingRam;
 #ifdef SAMPLING_FSMC
 	DMA2_Stream5->PAR  = (uint32_t)FSMC_ADDR;
 #else
 	DMA2_Stream5->PAR  = (uint32_t)&(SAMPLING_PORT->IDR);
 #endif
-	DMA2_Stream5->NDTR = transferCount;// / transferSize;
+	DMA2_Stream5->NDTR = dataTransferCount;//transferCount;// / transferSize;
 	DMA2_Stream5->FCR = DMA_SxFCR_DMDIS | DMA_SxFCR_FTH;
+}
 
-	//After-trigger delay timer
-	TIM8->CR1 = TIM_CR1_URS;//stop timer too
-	TIM8->CNT = 0;
-	TIM8->ARR = delayCount;//  / transferSize;
-	TIM8->PSC = TIM1->ARR;
-	TIM8->CR2 = 0;
-	TIM8->EGR = TIM_EGR_UG;
-	TIM8->SR &= ~TIM_SR_UIF;
-	TIM8->DIER = TIM_DIER_UIE;
+void Sampler::SetupRLESamplingDMA(void *dataBufferA, void *dataBufferB, uint32_t dataTransferCount)
+{
+	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_DMA2EN, ENABLE);
+	uint32_t dmaSize = CalcDMATransferSize();
 
-	InterruptController::EnableChannel(TIM8_UP_TIM13_IRQn, 2, 0, SamplingFrameCompelte);
+	//TIM1_UP -> DMA2, Ch6, Stream5
+	//DMA should be stopped before this point
+	DMA2_Stream5->CR = (DMA_SxCR_CHSEL_1 | DMA_SxCR_CHSEL_2) | dmaSize | DMA_SxCR_MINC | DMA_SxCR_DBM | DMA_SxCR_TCIE;
+	//DMA2_Stream5->CR = D<>| dmaSize | DMA_SxCR_MINC | DMA_SxCR_CIRC;
+	DMA2_Stream5->M0AR = (uint32_t)dataBufferA;
+	DMA2_Stream5->M1AR = (uint32_t)dataBufferB;
+#ifdef SAMPLING_FSMC
+	DMA2_Stream5->PAR  = (uint32_t)FSMC_ADDR;
+#else
+	DMA2_Stream5->PAR  = (uint32_t)&(SAMPLING_PORT->IDR);
+#endif
+	DMA2_Stream5->NDTR = dataTransferCount;//transferCount;// / transferSize;
+	DMA2_Stream5->FCR = DMA_SxFCR_DMDIS | DMA_SxFCR_FTH;
+	DMA2->HIFCR = DMA_HIFCR_CTCIF5;
+
+	switch(transferSize)
+	{
+	case 1:
+		InterruptController::EnableChannel(DMA2_Stream5_IRQn, 0, 0,
+			SamplingRLEFrameInterrupt<uint8_t, RLE_8BIT_FLAG, RLE_8BIT_MAX_COUNT>);
+		samplingRLETailFrameInterrupt = SamplingRLETailFrameInterrupt<uint8_t, RLE_8BIT_FLAG, RLE_8BIT_MAX_COUNT>;
+		break;
+	default:
+	case 2:
+		InterruptController::EnableChannel(DMA2_Stream5_IRQn, 0, 0,
+				SamplingRLEFrameInterrupt<uint16_t, RLE_16BIT_FLAG, RLE_16BIT_MAX_COUNT>);
+		samplingRLETailFrameInterrupt = SamplingRLETailFrameInterrupt<uint16_t, RLE_16BIT_FLAG, RLE_16BIT_MAX_COUNT>;
+		break;
+	}
+
+}
+
+void Sampler::SetupRegularEXTITrigger(InterruptHandler interruptHandler)
+{
+	RCC_APB2PeriphClockCmd(RCC_APB2ENR_SYSCFGEN, ENABLE);
 
 	//Trigger setup
 	uint32_t rising = triggerMask & triggerValue;
@@ -114,32 +186,96 @@ void Sampler::Setup()
 
 	__DSB();
 
-	if(triggerMask & 0x0001)InterruptController::EnableChannel(EXTI0_IRQn, 0, 0, SamplingExternalEventInterrupt);
+	if(triggerMask & 0x0001)InterruptController::EnableChannel(EXTI0_IRQn, 0, 0, interruptHandler);
 	else InterruptController::DisableChannel(EXTI0_IRQn);
-	if(triggerMask & 0x0002)InterruptController::EnableChannel(EXTI1_IRQn, 0, 0, SamplingExternalEventInterrupt);
+	if(triggerMask & 0x0002)InterruptController::EnableChannel(EXTI1_IRQn, 0, 0, interruptHandler);
 	else InterruptController::DisableChannel(EXTI1_IRQn);
-	if(triggerMask & 0x0004)InterruptController::EnableChannel(EXTI2_IRQn, 0, 0, SamplingExternalEventInterrupt);
+	if(triggerMask & 0x0004)InterruptController::EnableChannel(EXTI2_IRQn, 0, 0, interruptHandler);
 	else InterruptController::DisableChannel(EXTI2_IRQn);
-	if(triggerMask & 0x0008)InterruptController::EnableChannel(EXTI3_IRQn, 0, 0, SamplingExternalEventInterrupt);
+	if(triggerMask & 0x0008)InterruptController::EnableChannel(EXTI3_IRQn, 0, 0, interruptHandler);
 	else InterruptController::DisableChannel(EXTI3_IRQn);
-	if(triggerMask & 0x0010)InterruptController::EnableChannel(EXTI4_IRQn, 0, 0, SamplingExternalEventInterrupt);
+	if(triggerMask & 0x0010)InterruptController::EnableChannel(EXTI4_IRQn, 0, 0, interruptHandler);
 	else InterruptController::DisableChannel(EXTI4_IRQn);
-	if(triggerMask & 0x03E0)InterruptController::EnableChannel(EXTI9_5_IRQn, 0, 0, SamplingExternalEventInterrupt);
+	if(triggerMask & 0x03E0)InterruptController::EnableChannel(EXTI9_5_IRQn, 0, 0, interruptHandler);
 	else InterruptController::DisableChannel(EXTI9_5_IRQn);
-	if(triggerMask & 0xFC00)InterruptController::EnableChannel(EXTI15_10_IRQn, 0, 0, SamplingExternalEventInterrupt);
+	if(triggerMask & 0xFC00)InterruptController::EnableChannel(EXTI15_10_IRQn, 0, 0, interruptHandler);
 	else InterruptController::DisableChannel(EXTI15_10_IRQn);
 
-#ifdef SAMPLING_MANUAL
+#ifdef SAMPLING_MANUAL //push-button-trigger
 	TIM8->SMCR = TIM_SMCR_TS_0 | TIM_SMCR_TS_1 | TIM_SMCR_TS_2;//External trigger input
 	TIM8->SMCR |= TIM_SMCR_SMS_1 | TIM_SMCR_SMS_2;
 	TIM8->DIER |= TIM_DIER_TIE;
 	InterruptController::EnableChannel(TIM8_TRG_COM_TIM14_IRQn, 2, 0, SamplingManualStart);
+	samplingManualToExternalTransit = interruptHandler;
 #endif
+}
+
+void Sampler::SetupDelayTimer()
+{
+	RCC_APB2PeriphClockCmd(RCC_APB2ENR_TIM8EN, ENABLE);
+	//After-trigger delay timer
+	TIM8->CR1 = TIM_CR1_URS;//stop timer too
+	TIM8->CNT = 0;
+	TIM8->ARR = delayCount;//  / transferSize;
+	TIM8->PSC = TIM1->ARR;
+	TIM8->CR2 = 0;
+	TIM8->EGR = TIM_EGR_UG;
+	TIM8->SR &= ~TIM_SR_UIF;
+	TIM8->DIER = TIM_DIER_UIE;
+
+	InterruptController::EnableChannel(TIM8_UP_TIM13_IRQn, 2, 0, SamplingFrameCompelte);
+}
+
+void Sampler::SetupRegular()
+{
+	//Sampling scheme:
+	//TIM1 overflows with sampling period. Overflow triggers DMA read from sampling port.
+	//DMA works in circular mode (so no bursts possible) continuously writing data from GPIO port to
+	//sampling ram buffer
+	//Once trigger interrupt shoots TIM8 comes in play counting "sampling period" * "delay count" ticks.
+	//Once TIM8 overflows and sampled data are sent to host.
+	SetupSamplingTimer();
+	SetupSamplingDMA(samplingRam, transferCount);
+	SetupDelayTimer();
+	SetupRegularEXTITrigger(SamplingExternalEventInterrupt);
+}
+
+void Sampler::SetupRLE()
+{
+	//Sampling scheme:
+	//Same as regular mode TIM1 provides reference clock for taking samples, but data are being stored in
+	//the temporary buffer. Once buffer is full (DMA still works in circular mode) compression functions
+	//scans it, writing to final sampling buffer pairs:
+	//	1. Value, with zeroed MSB
+	//	2. Repeat count for this value, MSB set high
+
+	for(int i = 0; i < MAX_RLE_SAMPLE_COUNT; i++)
+	{
+		rleTempSamplingRamA[i] = rleTempSamplingRamB[i] = 0;
+	}
+	rlePtr = 0;
+	rleValue = 0;
+	rleRepeatCount = 0;
+	rleDelayCount = delayCount;
+	samplingRam[0] = rleValue;
+	rleTailSampling = false;
+
+	SetupSamplingTimer();
+	SetupRLESamplingDMA(rleTempSamplingRamA, rleTempSamplingRamB, MAX_RLE_SAMPLE_COUNT);
+	SetupRegularEXTITrigger(SamplingRLEExternalEventInterrupt);
 }
 
 void Sampler::Start()
 {
-	Setup();
+	if(flags & SUMP_FLAG1_ENABLE_RLE)
+	{
+		SetupRLE();
+		//SetupRegular();
+	}
+	else
+	{
+		SetupRegular();
+	}
 	DMA2->HIFCR = DMA_HIFCR_CTCIF5;
 	DMA2_Stream5->CR |= DMA_SxCR_EN;
 	TIM1->CR1 |= TIM_CR1_CEN;//enable timer
@@ -168,7 +304,7 @@ uint32_t Sampler::ActualTransferCount()
 
 uint8_t* Sampler::GetBufferTail()
 {
-	return samplingRam + ActualTransferCount() * transferSize;
+	return (uint8_t*)(samplingRam) + ActualTransferCount() * transferSize;
 }
 
 uint32_t Sampler::GetBufferTailSize()
@@ -183,7 +319,7 @@ uint32_t Sampler::GetBufferSize()
 
 uint8_t* Sampler::GetBuffer()
 {
-	return samplingRam;
+	return (uint8_t*)samplingRam;
 }
 
 //START-----------NDTR---------------------END//
@@ -244,10 +380,160 @@ static void SamplingExternalEventInterrupt()
 	//la_debug[1]++;
 }
 
+static void SamplingRLEExternalEventInterrupt()
+{
+	EXTI->PR = 0xffffffff;
+	__DSB();
+	EXTI->IMR = 0;
+	rleDelayCount = delayCount;
+	rleTailSampling = true;
+	InterruptController::SetHandler(DMA2_Stream5_IRQn, samplingRLETailFrameInterrupt);
+}
+
 static void SamplingManualStart()
 {
 	TIM8->SR &= ~TIM_SR_TIF;
 	TIM8->DIER &= ~TIM_DIER_TIE;
 	//call regular handler
-	SamplingExternalEventInterrupt();
+	//SamplingExternalEventInterrupt();
+	samplingManualToExternalTransit();
+}
+
+//#define store ((samplesType*)samplingRam)
+//template <class samplesType = uint8_t, int FLAG = RLE_8BIT_FLAG, int MAX_COUNT = RLE_8BIT_MAX_COUNT>
+template <class samplesType, uint32_t FLAG, uint32_t MAX_COUNT>
+static void SamplingRLEFrameInterrupt()
+{
+	DMA2->HIFCR = DMA_HIFCR_CTCIF5;
+
+	GPIOD->PUPDR = 0x0004;
+
+	static samplesType * store = (samplesType*)samplingRam;
+	samplesType * samples = (samplesType*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
+	//uint16_t * store = (uint16_t*)samplingRam;
+	//uint16_t * samples = (uint16_t*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
+	//int start = 0;
+	int n = MAX_RLE_SAMPLE_COUNT;
+	uint32_t newValue;
+
+	do
+	{
+		newValue =  *samples++;// & MAX_COUNT;
+
+		if(rleValue == newValue)
+		{
+			rleRepeatCount++;
+			if(MAX_COUNT == rleRepeatCount)//repeat count overflow
+			{
+				store[rlePtr++] = rleValue;
+				store[rlePtr++] = rleRepeatCount | FLAG;
+				rleRepeatCount = 0;
+				if(rlePtr >= transferCount)
+				{
+					rlePtr = 0;
+				}
+			}
+		}
+		else//change detected
+		{
+			store[rlePtr++] = rleValue;
+			//if(rleRepeatCount != 0)//non zero repeat count
+			{
+				store[rlePtr++] = rleRepeatCount | FLAG;
+			}
+			if(rlePtr >= transferCount)
+			{
+				rlePtr = 0;
+			}
+
+			rleRepeatCount = 0;
+			rleValue = newValue;
+		}
+	}
+	while(--n);
+
+	GPIOD->PUPDR = 0x0008;
+}
+
+template <class samplesType, uint32_t FLAG, uint32_t MAX_COUNT>
+static void SamplingRLETailFrameInterrupt()
+{
+	DMA2->HIFCR = DMA_HIFCR_CTCIF5;
+
+	GPIOD->PUPDR = 0x0004;
+
+	static samplesType * store = (samplesType*)samplingRam;
+	samplesType * samples = (samplesType*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
+	//uint16_t * store = (uint16_t*)samplingRam;
+	//uint16_t * samples = (uint16_t*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
+	int start = 0;
+	uint32_t newValue;
+
+	do
+	{
+		newValue =  samples[start++];// & MAX_COUNT;
+
+		if(rleValue == newValue)
+		{
+			rleRepeatCount++;
+			if(MAX_COUNT == rleRepeatCount)//repeat count overflow
+			{
+				store[rlePtr++] = rleValue;
+				store[rlePtr++] = rleRepeatCount | FLAG;
+				rleRepeatCount = 0;
+
+				rleDelayCount -= 2;
+				if(rleDelayCount <= 0)
+				{
+					SamplingFrameCompelte();
+					return;
+				}
+
+//				if(rlePtr >= transferCount)
+//				{
+//					rlePtr = 0;
+//				}
+			}
+		}
+		else//change detected
+		{
+			{
+				store[rlePtr++] = rleValue;
+				store[rlePtr++] = rleRepeatCount | FLAG;
+				rleDelayCount-=2;
+
+//				if(rleRepeatCount != 0)//non zero repeat count
+//				{
+//					rleDelayCount-=2;
+//					store[rlePtr++] = rleRepeatCount | FLAG;
+//				}
+//				else
+//				{
+//					rleDelayCount--;
+//				}
+
+				if(rleDelayCount <= 0)
+				{
+					SamplingFrameCompelte();
+					return;
+				}
+			}
+
+//			if(rlePtr >= transferCount)
+//			{
+//				rlePtr = 0;
+//			}
+
+			rleRepeatCount = 0;
+			rleValue = newValue;
+		}
+	}
+	while(start != MAX_RLE_SAMPLE_COUNT);
+
+	if(rlePtr >= transferCount)
+	{
+		rlePtr = 0;
+	}
+
+	GPIOD->PUPDR = 0x0008;
 }

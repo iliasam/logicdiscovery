@@ -160,7 +160,7 @@ int SumpProcessRequest(uint8_t *buffer, int len)
 			{
 				RCC_ClocksTypeDef clocks;
 				RCC_GetClocksFreq(&clocks);
-				divider = CalcLocalDivider(divider, clocks.PCLK2_Frequency, SUMP_ORIGINAL_FREQ);
+				divider = CalcLocalDivider(divider, clocks.SYSCLK_Frequency, SUMP_ORIGINAL_FREQ);
 			}
 			if(divider == 0)
 			{
@@ -209,21 +209,40 @@ int SumpProcessRequest(uint8_t *buffer, int len)
 
 void SamplingComplete()
 {
-	int num = 0;
-	uint8_t* ptr = sampler.GetBufferTail() - sampler.GetBytesPerTransfer();//SamplingGetBuffer(sbpOld);
+	uint32_t i;
 	__disable_irq();
-	int i = 0;
-	//SUMP requests samples to be sent in reverse order: newest items first
-	for(; i < sampler.GetBufferTailSize() - sampler.GetBytesPerTransfer(); i++, num++)
+	if(sampler.GetBytesPerTransfer() == 1)
 	{
-		byteTXFunc(*ptr);//VCP_ByteTx(*ptr);
-		ptr--;
+		uint8_t* ptr = sampler.GetBufferTail() - 1;//sampler.GetBytesPerTransfer();
+		//SUMP requests samples to be sent in reverse order: newest items first
+		for(i = 0; i < sampler.GetBufferTailSize(); i++)
+		{
+			byteTXFunc(*ptr);//VCP_ByteTx(*ptr);
+			ptr--;
+		}
+		ptr = sampler.GetBuffer() + sampler.GetBufferSize() - 1;
+		for(; i < sampler.GetBufferSize(); i++)
+		{
+			byteTXFunc(*ptr);//VCP_ByteTx(*ptr);
+			ptr--;
+		}
 	}
-	ptr = sampler.GetBuffer() + sampler.GetBufferSize() - sampler.GetBytesPerTransfer();// SamplingGetBuffer(sbpTotal) + SamplingGetBufferSize(sbpTotal) - 1;
-	for(; i < sampler.GetBufferSize(); i++, num++)
+	else if(sampler.GetBytesPerTransfer() == 2)
 	{
-		byteTXFunc(*ptr);//VCP_ByteTx(*ptr);
-		ptr--;
+		uint8_t *ptr = sampler.GetBufferTail() - sampler.GetBytesPerTransfer();
+		for(i = 0; i < sampler.GetBufferTailSize(); i += sampler.GetBytesPerTransfer())
+		{
+			byteTXFunc(ptr[0]);
+			byteTXFunc(ptr[1]);
+			ptr -= sampler.GetBytesPerTransfer();
+		}
+		ptr = sampler.GetBuffer() + sampler.GetBufferSize() - sampler.GetBytesPerTransfer();
+		for(; i < sampler.GetBufferSize(); i += sampler.GetBytesPerTransfer())
+		{
+			byteTXFunc(ptr[0]);
+			byteTXFunc(ptr[1]);
+			ptr -= sampler.GetBytesPerTransfer();
+		}
 	}
 	__enable_irq();
 }

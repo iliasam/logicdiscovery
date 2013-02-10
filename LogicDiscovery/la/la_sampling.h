@@ -11,6 +11,8 @@
 #include "nvic.h"
 
 #define MAX_SAMPLING_RAM (24*1024)
+//#define MAX_RLE_BUFFER	(64)
+#define MAX_RLE_SAMPLE_COUNT	(128)
 //#define SAMPLING_FSMC
 #define FSMC_ADDR (0x60000000)
 //Port A: used for USB_FS, non-usable
@@ -25,8 +27,6 @@
 class Sampler
 {
 private:
-	uint32_t transferCount;
-	uint32_t delayCount;
 	uint32_t triggerMask;
 	uint32_t triggerValue;
 	uint16_t flags;
@@ -34,11 +34,22 @@ private:
 
 	int transferSize;
 
-	void Setup();
+	void SetupRegular();
+	void SetupRLE();
+
+	void SetupRegularEXTITrigger(InterruptHandler interruptHandler);
+	//Enables TIM1 for triggering DMA with desired sampling frequency
+	void SetupSamplingTimer();
+	void SetupDelayTimer();
+	//
+	void SetupSamplingDMA(void *dataBuffer, uint32_t dataTransferCount);
+	void SetupRLESamplingDMA(void *dataBufferA, void *dataBufferB, uint32_t dataTransferCount);
+	uint32_t CalcDMATransferSize();
+
 	uint32_t ActualTransferCount();
 public:
-	void SetBufferSize(uint32_t value){transferCount = value;}
-	void SetDelayCount(uint32_t value){delayCount = value;}
+	void SetBufferSize(uint32_t value);//{transferCount = value;}
+	void SetDelayCount(uint32_t value);//{delayCount = value;}
 	void SetTriggerMask(uint32_t value){triggerMask = value;}
 	void SetTriggerValue(uint32_t value){triggerValue = value;}
 	void SetFlags(uint32_t value){flags = value;}
