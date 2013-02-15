@@ -58,8 +58,8 @@ PALTFORM = ./platform/stm32f4
 # While these two can stay in the CM3 folder as part of the library
 #SRC += core_cm4.c
 SRC += system.c
-SRC += syscalls.c stm32f4xx_dma.c stm32f4xx_tim.c stm32f4xx_gpio.c stm32f4xx_i2c.c stm32f4xx_fsmc.c stm32f4xx_usart.c
-SRC += stm32f4xx_adc.c misc.c stm32f4xx_sdio.c stm32f4xx_exti.c stm32f4xx_syscfg.c stm32f4xx_rcc.c  stm32f4xx_dcmi.c
+SRC += syscalls.c stm32f4xx_dma.c stm32f4xx_tim.c stm32f4xx_gpio.c stm32f4xx_fsmc.c stm32f4xx_usart.c
+SRC += stm32f4xx_adc.c misc.c stm32f4xx_exti.c stm32f4xx_syscfg.c stm32f4xx_rcc.c  stm32f4xx_dcmi.c
 SRC += delay.c
 #SRC += LCD.c AsciiLib.c
 #STM32 USB FS Lib
@@ -109,7 +109,7 @@ FLASH_TOOL = STM32LOADER
 # Optimization level, can be [0, 1, 2, 3, s]. 
 # 0 = turn off optimization. s = optimize for size.
 # (Note: 3 is not always the best optimization level. See avr-libc FAQ.)
-OPT = 3
+OPT = s
 
 # Debugging format.
 # Native formats for AVR-GCC's -g are stabs [default], or dwarf-2.
@@ -327,7 +327,6 @@ GENDEPFLAGS = -MD -MP -MF .dep/$(@F).d
 # Add target processor to flags.
 ALL_CFLAGS  = -mcpu=$(MCU) $(THUMB_IW) -I. $(CFLAGS) $(GENDEPFLAGS)
 ALL_ASFLAGS = -mcpu=$(MCU) $(THUMB_IW) -I. -x assembler-with-cpp $(ASFLAGS)
-
 
 # Default target.
 all: begin gccversion sizebefore build sizeafter finished end

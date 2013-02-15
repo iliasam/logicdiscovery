@@ -66,7 +66,7 @@ void SetupDemoTimer()
 
 	RCC_APB1PeriphClockCmd(RCC_APB1ENR_TIM2EN, ENABLE);
 	TIM2->CR1 = TIM_CR1_URS;
-	TIM2->ARR = 18300;
+	TIM2->ARR = 19999;
 	TIM2->PSC = 2;
 	TIM2->CR2 = 0;
 	TIM2->DIER = TIM_DIER_UIE;
@@ -89,8 +89,6 @@ static void DemoUSARTIrq()
 {
 	TIM2->SR &= ~TIM_SR_UIF;
 	if(USART2->SR & USART_SR_TXE)
-		USART2->DR = num++;
-	while(!(USART2->SR & USART_SR_TXE));
 		USART2->DR = num++;
 }
 
@@ -132,10 +130,10 @@ int SumpProcessRequest(uint8_t *buffer, int len)
 		}
 		//SamplingSetupTimer(16);
 		sampler.Stop();
-	    SamplingClearBuffer();
 	    result = 1;
 	  break;
 	case SUMP_CMD_RUN://run
+		SamplingClearBuffer();
 		sampler.Start();
 		sampler.Arm(SamplingComplete);
 		result = 1;

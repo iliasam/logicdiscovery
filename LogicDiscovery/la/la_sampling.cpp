@@ -22,10 +22,10 @@ static void SamplingRLEExternalEventInterrupt();
 static void SamplingManualStart();
 
 template <class samplesType, uint32_t FLAG, uint32_t MAX_COUNT>
-static void SamplingRLEFrameInterrupt() __attribute__ ( ( isr ) );//__attribute__ ( ( isr ) ) ;
+static void SamplingRLEFrameInterrupt() __attribute__ ( ( isr ) ) ;//__attribute__ ( ( isr ) ) ;
 
 template <class samplesType, uint32_t FLAG, uint32_t MAX_COUNT>
-static void SamplingRLETailFrameInterrupt() __attribute__ ( ( isr ) );// __attribute__ ( ( isr, naked ) );
+static void SamplingRLETailFrameInterrupt() __attribute__ ( ( isr ) ) ;// __attribute__ ( ( isr, naked ) );
 
 static InterruptHandler samplingManualToExternalTransit = NULL;
 static InterruptHandler samplingRLETailFrameInterrupt = NULL;
@@ -263,6 +263,8 @@ void Sampler::SetupRLE()
 	SetupSamplingTimer();
 	SetupRLESamplingDMA(rleTempSamplingRamA, rleTempSamplingRamB, MAX_RLE_SAMPLE_COUNT);
 	SetupRegularEXTITrigger(SamplingRLEExternalEventInterrupt);
+
+	GPIOD->PUPDR = 2 << 4;
 }
 
 void Sampler::Start()
@@ -387,6 +389,7 @@ static void SamplingRLEExternalEventInterrupt()
 	EXTI->IMR = 0;
 	rleDelayCount = delayCount;
 	rleTailSampling = true;
+	GPIOD->PUPDR = 1 << 4;
 	InterruptController::SetHandler(DMA2_Stream5_IRQn, samplingRLETailFrameInterrupt);
 }
 
@@ -412,7 +415,6 @@ static void SamplingRLEFrameInterrupt()
 	samplesType * samples = (samplesType*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
 	//uint16_t * store = (uint16_t*)samplingRam;
 	//uint16_t * samples = (uint16_t*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
-	//int start = 0;
 	int n = MAX_RLE_SAMPLE_COUNT;
 	uint32_t newValue;
 
@@ -437,10 +439,7 @@ static void SamplingRLEFrameInterrupt()
 		else//change detected
 		{
 			store[rlePtr++] = rleValue;
-			//if(rleRepeatCount != 0)//non zero repeat count
-			{
-				store[rlePtr++] = rleRepeatCount | FLAG;
-			}
+			store[rlePtr++] = rleRepeatCount | FLAG;
 			if(rlePtr >= transferCount)
 			{
 				rlePtr = 0;
@@ -466,12 +465,14 @@ static void SamplingRLETailFrameInterrupt()
 	samplesType * samples = (samplesType*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
 	//uint16_t * store = (uint16_t*)samplingRam;
 	//uint16_t * samples = (uint16_t*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
-	int start = 0;
+	int n = MAX_RLE_SAMPLE_COUNT;
 	uint32_t newValue;
+	//uint32_t nextValue;
 
 	do
 	{
-		newValue =  samples[start++];// & MAX_COUNT;
+		newValue =  *samples++;// & MAX_COUNT;
+		//nextValue=  *samples++;
 
 		if(rleValue == newValue)
 		{
@@ -489,10 +490,10 @@ static void SamplingRLETailFrameInterrupt()
 					return;
 				}
 
-//				if(rlePtr >= transferCount)
-//				{
-//					rlePtr = 0;
-//				}
+				if(rlePtr >= transferCount)
+				{
+					rlePtr = 0;
+				}
 			}
 		}
 		else//change detected
@@ -500,18 +501,8 @@ static void SamplingRLETailFrameInterrupt()
 			{
 				store[rlePtr++] = rleValue;
 				store[rlePtr++] = rleRepeatCount | FLAG;
+
 				rleDelayCount-=2;
-
-//				if(rleRepeatCount != 0)//non zero repeat count
-//				{
-//					rleDelayCount-=2;
-//					store[rlePtr++] = rleRepeatCount | FLAG;
-//				}
-//				else
-//				{
-//					rleDelayCount--;
-//				}
-
 				if(rleDelayCount <= 0)
 				{
 					SamplingFrameCompelte();
@@ -519,21 +510,61 @@ static void SamplingRLETailFrameInterrupt()
 				}
 			}
 
-//			if(rlePtr >= transferCount)
-//			{
-//				rlePtr = 0;
-//			}
+			if(rlePtr >= transferCount)
+			{
+				rlePtr = 0;
+			}
 
 			rleRepeatCount = 0;
 			rleValue = newValue;
 		}
-	}
-	while(start != MAX_RLE_SAMPLE_COUNT);
 
-	if(rlePtr >= transferCount)
-	{
-		rlePtr = 0;
+		/*if(rleValue == nextValue)
+		{
+			rleRepeatCount++;
+			if(MAX_COUNT == rleRepeatCount)//repeat count overflow
+			{
+				store[rlePtr++] = rleValue;
+				store[rlePtr++] = rleRepeatCount | FLAG;
+				rleRepeatCount = 0;
+
+				rleDelayCount -= 2;
+				if(rleDelayCount <= 0)
+				{
+					SamplingFrameCompelte();
+					return;
+				}
+
+				if(rlePtr >= transferCount)
+				{
+					rlePtr = 0;
+				}
+			}
+		}
+		else//change detected
+		{
+			{
+				store[rlePtr++] = rleValue;
+				store[rlePtr++] = rleRepeatCount | FLAG;
+
+				rleDelayCount-=2;
+				if(rleDelayCount <= 0)
+				{
+					SamplingFrameCompelte();
+					return;
+				}
+			}
+
+			if(rlePtr >= transferCount)
+			{
+				rlePtr = 0;
+			}
+
+			rleRepeatCount = 0;
+			rleValue = nextValue;
+		}*/
 	}
+	while(--n);
 
 	GPIOD->PUPDR = 0x0008;
 }

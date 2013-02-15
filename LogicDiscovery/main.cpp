@@ -16,7 +16,7 @@
 USART_TypeDef *uart;
 int configPins;
 
-void UartCommandInterruptHandler(void);
+void UartCommandInterruptHandler(void) __attribute((isr));
 
 static void Init();
 
@@ -264,6 +264,7 @@ void UartCommandInterruptHandler(void)
 	if((sr & USART_SR_RXNE))
 	{
 		uint8_t byte = USART_ReceiveData(USART6);
+		//USART6->DR = byte;
 		uartRXBuffer[uartRXCount++] = byte;
 		if(SumpProcessRequest(uartRXBuffer, uartRXCount))
 		{
