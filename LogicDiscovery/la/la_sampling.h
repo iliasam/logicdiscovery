@@ -11,7 +11,7 @@
 #include "nvic.h"
 
 #define MAX_SAMPLING_RAM (24*1024)
-//#define MAX_RLE_BUFFER	(64)
+//#define MAX_RLE_SAMPLE_COUNT	(64)
 #define MAX_RLE_SAMPLE_COUNT	(128)
 //#define SAMPLING_FSMC
 #define FSMC_ADDR (0x60000000)
@@ -23,6 +23,9 @@
 #define SAMPLING_PORT GPIOD
 //enable manual trigger by user-button
 #define SAMPLING_MANUAL
+//RLE mode only Enable forcing highest sampled bit to output zero. If disabled - this bit has to be
+//zeroed by interrupt handler stealing some cpu cycles.
+//#define SAMPLING_RLE_FORCE_ZERO_ON_MSB
 
 class Sampler
 {

@@ -114,17 +114,28 @@ void Sampler::SetupSamplingDMA(void *dataBuffer, uint32_t dataTransferCount)
 #endif
 	DMA2_Stream5->NDTR = dataTransferCount;//transferCount;// / transferSize;
 	DMA2_Stream5->FCR = DMA_SxFCR_DMDIS | DMA_SxFCR_FTH;
+
+#ifdef SAMPLING_RLE_FORCE_ZERO_ON_MSB
+	GPIO_InitTypeDef GPIO_InitStructure;
+	GPIO_InitStructure.GPIO_Pin = GPIO_Pin_7 | GPIO_Pin_15;
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_DOWN ;
+	GPIO_Init(SAMPLING_PORT, &GPIO_InitStructure);
+	SAMPLING_PORT->ODR = 0;
+#endif
 }
 
 void Sampler::SetupRLESamplingDMA(void *dataBufferA, void *dataBufferB, uint32_t dataTransferCount)
 {
+	GPIO_InitTypeDef GPIO_InitStructure;
 	RCC_AHB1PeriphClockCmd(RCC_AHB1ENR_DMA2EN, ENABLE);
 	uint32_t dmaSize = CalcDMATransferSize();
 
 	//TIM1_UP -> DMA2, Ch6, Stream5
 	//DMA should be stopped before this point
 	DMA2_Stream5->CR = (DMA_SxCR_CHSEL_1 | DMA_SxCR_CHSEL_2) | dmaSize | DMA_SxCR_MINC | DMA_SxCR_DBM | DMA_SxCR_TCIE;
-	//DMA2_Stream5->CR = D<>| dmaSize | DMA_SxCR_MINC | DMA_SxCR_CIRC;
 	DMA2_Stream5->M0AR = (uint32_t)dataBufferA;
 	DMA2_Stream5->M1AR = (uint32_t)dataBufferB;
 #ifdef SAMPLING_FSMC
@@ -142,15 +153,26 @@ void Sampler::SetupRLESamplingDMA(void *dataBufferA, void *dataBufferB, uint32_t
 		InterruptController::EnableChannel(DMA2_Stream5_IRQn, 0, 0,
 			SamplingRLEFrameInterrupt<uint8_t, RLE_8BIT_FLAG, RLE_8BIT_MAX_COUNT>);
 		samplingRLETailFrameInterrupt = SamplingRLETailFrameInterrupt<uint8_t, RLE_8BIT_FLAG, RLE_8BIT_MAX_COUNT>;
+
+		GPIO_InitStructure.GPIO_Pin = GPIO_Pin_7;
 		break;
 	default:
 	case 2:
 		InterruptController::EnableChannel(DMA2_Stream5_IRQn, 0, 0,
 				SamplingRLEFrameInterrupt<uint16_t, RLE_16BIT_FLAG, RLE_16BIT_MAX_COUNT>);
 		samplingRLETailFrameInterrupt = SamplingRLETailFrameInterrupt<uint16_t, RLE_16BIT_FLAG, RLE_16BIT_MAX_COUNT>;
+
+		GPIO_InitStructure.GPIO_Pin = GPIO_Pin_15;
 		break;
 	}
-
+#ifdef SAMPLING_RLE_FORCE_ZERO_ON_MSB
+	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_100MHz;
+	GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+	GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_DOWN ;
+	GPIO_Init(SAMPLING_PORT, &GPIO_InitStructure);
+	SAMPLING_PORT->ODR = 0;
+#endif
 }
 
 void Sampler::SetupRegularEXTITrigger(InterruptHandler interruptHandler)
@@ -272,7 +294,6 @@ void Sampler::Start()
 	if(flags & SUMP_FLAG1_ENABLE_RLE)
 	{
 		SetupRLE();
-		//SetupRegular();
 	}
 	else
 	{
@@ -291,7 +312,6 @@ void Sampler::Stop()
 
 void Sampler::Arm(InterruptHandler handler)
 {
-	//SamplingSetCondition(samplingTriggerMask, samplingTriggerValue);
 	EXTI->PR = 0xffffffff;//clear pending
 	__DSB();
 	EXTI->IMR = triggerMask;
@@ -323,35 +343,6 @@ uint8_t* Sampler::GetBuffer()
 {
 	return (uint8_t*)samplingRam;
 }
-
-//START-----------NDTR---------------------END//
-//        NEW               OLD
-//
-//uint8_t* SamplingGetBuffer(SamplingBufferPart part)
-//{
-//	switch(part)
-//	{
-//	case sbpOld:
-//		return samplingRam + GetTransferCount();
-//	case sbpNew:
-//	case sbpTotal:
-//		return samplingRam;
-//	}
-//	//return samplingRam;
-//}
-//
-//uint32_t SamplingGetBufferSize(SamplingBufferPart part)
-//{
-//	switch(part)
-//	{
-//	case sbpOld:
-//		return samplingBufferSize - GetTransferCount();
-//	case sbpNew:
-//		return GetTransferCount();
-//	case sbpTotal:
-//		return samplingBufferSize;
-//	}
-//}
 
 void SamplingClearBuffer()
 {
@@ -402,25 +393,23 @@ static void SamplingManualStart()
 	samplingManualToExternalTransit();
 }
 
-//#define store ((samplesType*)samplingRam)
-//template <class samplesType = uint8_t, int FLAG = RLE_8BIT_FLAG, int MAX_COUNT = RLE_8BIT_MAX_COUNT>
 template <class samplesType, uint32_t FLAG, uint32_t MAX_COUNT>
 static void SamplingRLEFrameInterrupt()
 {
 	DMA2->HIFCR = DMA_HIFCR_CTCIF5;
 
-	GPIOD->PUPDR = 0x0004;
-
 	static samplesType * store = (samplesType*)samplingRam;
 	samplesType * samples = (samplesType*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
-	//uint16_t * store = (uint16_t*)samplingRam;
-	//uint16_t * samples = (uint16_t*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
 	int n = MAX_RLE_SAMPLE_COUNT;
 	uint32_t newValue;
 
 	do
 	{
-		newValue =  *samples++;// & MAX_COUNT;
+		newValue =  *samples++
+#ifndef SAMPLING_RLE_FORCE_ZERO_ON_MSB
+				& MAX_COUNT
+#endif
+				;
 
 		if(rleValue == newValue)
 		{
@@ -450,8 +439,6 @@ static void SamplingRLEFrameInterrupt()
 		}
 	}
 	while(--n);
-
-	GPIOD->PUPDR = 0x0008;
 }
 
 template <class samplesType, uint32_t FLAG, uint32_t MAX_COUNT>
@@ -459,20 +446,18 @@ static void SamplingRLETailFrameInterrupt()
 {
 	DMA2->HIFCR = DMA_HIFCR_CTCIF5;
 
-	GPIOD->PUPDR = 0x0004;
-
 	static samplesType * store = (samplesType*)samplingRam;
 	samplesType * samples = (samplesType*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
-	//uint16_t * store = (uint16_t*)samplingRam;
-	//uint16_t * samples = (uint16_t*)((DMA2_Stream5->CR & DMA_SxCR_CT) ? rleTempSamplingRamA : rleTempSamplingRamB);
 	int n = MAX_RLE_SAMPLE_COUNT;
 	uint32_t newValue;
-	//uint32_t nextValue;
 
 	do
 	{
-		newValue =  *samples++;// & MAX_COUNT;
-		//nextValue=  *samples++;
+		newValue =  *samples++
+#ifndef SAMPLING_RLE_FORCE_ZERO_ON_MSB
+				& MAX_COUNT
+#endif
+				;
 
 		if(rleValue == newValue)
 		{
@@ -502,7 +487,7 @@ static void SamplingRLETailFrameInterrupt()
 				store[rlePtr++] = rleValue;
 				store[rlePtr++] = rleRepeatCount | FLAG;
 
-				rleDelayCount-=2;
+				rleDelayCount -= 2;
 				if(rleDelayCount <= 0)
 				{
 					SamplingFrameCompelte();
@@ -518,53 +503,6 @@ static void SamplingRLETailFrameInterrupt()
 			rleRepeatCount = 0;
 			rleValue = newValue;
 		}
-
-		/*if(rleValue == nextValue)
-		{
-			rleRepeatCount++;
-			if(MAX_COUNT == rleRepeatCount)//repeat count overflow
-			{
-				store[rlePtr++] = rleValue;
-				store[rlePtr++] = rleRepeatCount | FLAG;
-				rleRepeatCount = 0;
-
-				rleDelayCount -= 2;
-				if(rleDelayCount <= 0)
-				{
-					SamplingFrameCompelte();
-					return;
-				}
-
-				if(rlePtr >= transferCount)
-				{
-					rlePtr = 0;
-				}
-			}
-		}
-		else//change detected
-		{
-			{
-				store[rlePtr++] = rleValue;
-				store[rlePtr++] = rleRepeatCount | FLAG;
-
-				rleDelayCount-=2;
-				if(rleDelayCount <= 0)
-				{
-					SamplingFrameCompelte();
-					return;
-				}
-			}
-
-			if(rlePtr >= transferCount)
-			{
-				rlePtr = 0;
-			}
-
-			rleRepeatCount = 0;
-			rleValue = nextValue;
-		}*/
 	}
 	while(--n);
-
-	GPIOD->PUPDR = 0x0008;
 }
